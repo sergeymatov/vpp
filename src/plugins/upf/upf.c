@@ -33,9 +33,11 @@
 #include <vnet/plugin/plugin.h>
 #include <vpp/app/version.h>
 #include <vnet/dpo/lookup_dpo.h>
+#include <vnet/fib/fib_entry.h>
 #include <vnet/fib/ip4_fib.h>
 #include <vnet/fib/ip6_fib.h>
 #include <vnet/ip/ip6_hop_by_hop.h>
+#include <vpp/stats/stat_segment.h>
 
 #include <upf/upf.h>
 #include <upf/upf_pfcp.h>
@@ -214,7 +216,6 @@ vnet_upf_tdf_ul_enable_disable (fib_protocol_t fproto, u32 sw_if_index,
       upf_tdf_ul_lookup_add_i (vec_elt (gtm->tdf_ul_table[fproto],
 					fib_index), &pfx, fib_index);
 
-
       /*
          vnet_feature_enable_disable ((FIB_PROTOCOL_IP4 == fproto ?
          "ip4-unicast" :
@@ -294,11 +295,40 @@ upf_format_buffer_opaque_helper (const vlib_buffer_t * b, u8 * s)
   return s;
 }
 
+static void
+upf_gauge_update_assoc_total (stat_segment_directory_entry_t * e, u32 i)
+{
+  upf_main_t *sm = &upf_main;
+  if (!sm)
+    return;
+
+  e->value = vec_len (sm->nodes);
+}
+
+static void
+upf_fib_entries_total (stat_segment_directory_entry_t * e, u32 i)
+{
+
+  u32 val = fib_entry_pool_size();
+  e->value = val;
+}
+
+static void
+upf_gauge_update_sessions_total (stat_segment_directory_entry_t * e, u32 i)
+{
+  upf_main_t *sm = &upf_main;
+  if (!sm)
+    return;
+
+  e->value = vec_len (sm->sessions);
+}
+
 static clib_error_t *
 upf_init (vlib_main_t * vm)
 {
   upf_main_t *sm = &upf_main;
   clib_error_t *error;
+  u8 *name = 0;
 
   sm->vnet_main = vnet_get_main ();
   sm->vlib_main = vm;
@@ -362,6 +392,19 @@ upf_init (vlib_main_t * vm)
   if (error)
     return error;
 
+  vec_reset_length (name);
+  name = format (name, "/upf/upf_association_total%c", 0);
+  stat_segment_register_gauge (name, upf_gauge_update_assoc_total, 0);
+
+  vec_reset_length (name);
+  name = format (name, "/upf/upf_sessions_total%c", 0);
+  stat_segment_register_gauge (name, upf_gauge_update_sessions_total, 0);
+
+  vec_reset_length (name);
+  name = format (name, "/fib/fib_entries_total%c", 0);
+  stat_segment_register_gauge (name, upf_fib_entries_total, 0);
+
+  vec_free(name);
   return pfcp_server_main_init (vm);
 }
 

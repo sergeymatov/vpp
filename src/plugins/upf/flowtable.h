@@ -178,6 +178,8 @@ typedef struct
    * set cache size to 256 so that the worst node run fills the cache at most once */
 #define FLOW_CACHE_SZ 256
   u32 *flow_cache;
+
+  u64 flows_cnt;
 } flowtable_main_per_cpu_t;
 
 /*
@@ -198,6 +200,7 @@ typedef struct
   flow_entry_t *flows;
   pthread_spinlock_t flows_lock;
   u64 flows_cpt;
+  u64 flows_cnt;
 
   u16 timer_lifetime[FT_TIMEOUT_TYPE_MAX];
   u16 timer_max_lifetime;

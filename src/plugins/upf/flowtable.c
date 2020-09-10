@@ -170,6 +170,7 @@ expire_single_flow (flowtable_main_t * fm, flowtable_main_per_cpu_t * fmt,
 
       /* hashtable unlink */
       flowtable_entry_remove (fmt, f);
+      fmt->flows_cnt -= 1;
 
       /* free to flow cache && pool (last) */
       flow_entry_free (fm, fmt, f);
@@ -316,6 +317,7 @@ flowtable_entry_lookup_create (flowtable_main_t * fm,
   timer_entry->value = f - fm->flows;	/* index within the flow pool */
   f->timer_index = timer_entry - fmt->timers;	/* index within the timer pool */
   timer_wheel_insert_flow (fm, fmt, f);
+  fmt->flows_cnt += 1;
 
   /* insert in hash */
   kv->value = f - fm->flows;

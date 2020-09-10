@@ -19,6 +19,7 @@
 #include <vppinfra/pool.h>
 #include <vppinfra/types.h>
 #include <vppinfra/vec.h>
+#include <vpp/stats/stat_segment.h>
 
 #if CLIB_DEBUG > 1
 #define upf_debug clib_warning
@@ -76,6 +77,9 @@ flowtable_init_cpu (flowtable_main_t * fm, flowtable_main_per_cpu_t * fmt)
   /* init timer wheel */
   fmt->time_index = ~0;
 
+  /* init flows counter */
+  fmt->flows_cnt = 0;
+
   /* alloc TIMER_MAX_LIFETIME heads from the timers pool and fill them with defaults */
   pool_validate_index (fmt->timers, TIMER_MAX_LIFETIME - 1);
   upf_debug ("POOL SIZE %u", pool_elts (fmt->timers));
@@ -108,6 +112,26 @@ flowtable_init_cpu (flowtable_main_t * fm, flowtable_main_per_cpu_t * fmt)
   return error;
 }
 
+static void
+flowtable_gauge_update_flow_size (stat_segment_directory_entry_t * e, u32 i)
+{
+  flowtable_main_t *fm = &flowtable_main;
+  flowtable_main_per_cpu_t *fmt;
+
+  if (!fm)
+    return;
+
+  e->value = 0;
+
+  vec_foreach (fmt, fm->per_cpu)
+  {
+    // TODO: we are not thread-aware here. Add thread awarness / locks
+    // in case something goes wrong with workers count > 1
+    e->value += fmt->flows_cnt;
+  }
+
+}
+
 clib_error_t *
 flowtable_init (vlib_main_t * vm)
 {
@@ -115,6 +139,7 @@ flowtable_init (vlib_main_t * vm)
   clib_error_t *error = 0;
   flowtable_main_t *fm = &flowtable_main;
   vlib_thread_main_t *tm = vlib_get_thread_main ();
+  u8 *name = 0;
 
   fm->vlib_main = vm;
 
@@ -136,6 +161,12 @@ flowtable_init (vlib_main_t * vm)
       if (error)
 	return error;
     }
+
+  name=format (0, "/upf/flow_table_size%c", 0);
+  stat_segment_register_gauge (name, flowtable_gauge_update_flow_size,
+                               0);
+
+  vec_free(name);
 
   return error;
 }
