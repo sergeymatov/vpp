@@ -140,6 +140,10 @@ class IPv4Mixin(object):
     def ie_fteid(self):
         return IE_FTEID(V4=1, TEID=self.UNODE_TEID, ipv4=self.if_grx.local_ip4)
 
+    def ie_fteid_ch(self):
+        return IE_FTEID(V4=1, CH=1, CHID=1, choose_id=200)
+      }
+
     def ie_ue_ip_address(self, SD=0):
         return IE_UE_IP_Address(ipv4=self.ue_ip, V4=1, SD=SD)
 
@@ -264,6 +268,9 @@ class IPv6Mixin(object):
 
     def ie_fteid(self):
         return IE_FTEID(V6=1, TEID=self.UNODE_TEID, ipv6=self.if_grx.local_ip6)
+
+    def ie_fteid_ch(self):
+        return IE_FTEID(V6=1, CH=1, CHID=1, choose_id=200)
 
     def ie_ue_ip_address(self, SD=0):
         return IE_UE_IP_Address(ipv6=self.ue_ip, V6=1, SD=SD)
@@ -990,7 +997,7 @@ class TestPGWBase(PFCPHelper):
             IE_FAR_Id(id=1),
             self.ie_outer_header_removal(),
             IE_PDI(IE_list=[
-                self.ie_fteid(),
+                self.ie_fteid_ch(),
                 IE_NetworkInstance(instance="epc"),
                 IE_SDF_Filter(
                     FD=1,

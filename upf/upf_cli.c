@@ -607,10 +607,10 @@ upf_spec_enable_command_fn (vlib_main_t * vm,
 }
 
 /* *INDENT-OFF* */
-VLIB_CLI_COMMAND (upf_ftup_enable_command, static) = {
+VLIB_CLI_COMMAND (upf_spec_enable_command, static) = {
     .path = "upf specification release",
     .short_help = "upf specification release [15 | 16]",
-    .function = upf_ftup_enable_command_fn,
+    .function = upf_spec_enable_command_fn,
 };
 /* *INDENT-ON* */
 

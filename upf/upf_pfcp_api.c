@@ -811,15 +811,21 @@ static u32
 generate_teid (u32 start, u32 mask)
 {
   //TBD: put the number to mhash
-  return random_u32(&start) & mask;
+  u32 tmp = random_u32(&start) & mask;
+  return tmp;
 }
 
 static bool
-teid_lookup_by_choose_id(vlib_main_t *vm, u8 choose_id, u32 *teid)
+teid_lookup_by_choose_id(upf_main_t *gtm, u8 choose_id, u32 *teid)
 {
   //TBD: vlib_main_t will have static array
   //sized by u8_max. Index will match choose_id, value
   //matches corresponding teid.
+  if(gtm->choosed_teid[choose_id])
+  {
+    *teid = gtm->choosed_teid[choose_id];
+    return true;
+  }
   *teid = 0;
   return false;
 }
@@ -848,7 +854,6 @@ handle_create_pdr (upf_session_t * sx, pfcp_create_pdr_t * create_pdr,
   vec_foreach (pdr, create_pdr)
   {
     upf_pdr_t *create;
-    upf_nwi_t *nwi = NULL;
     upf_upip_res_t *res;
 
     vec_add2 (rules->pdr, create, 1);
@@ -863,7 +868,7 @@ handle_create_pdr (upf_session_t * sx, pfcp_create_pdr_t * create_pdr,
 
     if (ISSET_BIT (pdr->pdi.grp.fields, PDI_NETWORK_INSTANCE))
       {
-	nwi = lookup_nwi (pdr->pdi.network_instance);
+	upf_nwi_t *nwi = lookup_nwi (pdr->pdi.network_instance);
 	if (!nwi)
 	  {
 	    upf_debug ("PDR: %d, PDI for unknown network instance\n",
@@ -881,7 +886,7 @@ handle_create_pdr (upf_session_t * sx, pfcp_create_pdr_t * create_pdr,
       }
 
 
-    vec_foreach (res, gtw->upip_res)
+    vec_foreach (res, gtm->upip_res)
     {
       if (res->nwi_index == create->pdi.nwi_index)
         break;
@@ -897,29 +902,31 @@ handle_create_pdr (upf_session_t * sx, pfcp_create_pdr_t * create_pdr,
 	create->pdi.fields |= F_PDI_LOCAL_F_TEID;
         create->pdi.teid = pdr->pdi.f_teid;
         // We only generate F_TEID if NWI is defined
-        if (ISSET_BIT(pdi.f_teid.flags, F_TEID_CH) && res)
+        if (ISSET_BIT(pdr->pdi.f_teid.flags, F_TEID_CH) && res)
         {
-          if (ISSET_BIT(pdi.f_teid.flags, F_TEID_CHID))
+          if (ISSET_BIT(pdr->pdi.f_teid.flags, F_TEID_CHID))
           {
           /*TBD: lookup by chooseid
           */
-            u8 choose_id = pdi.f_teid.choose_id;
+            u8 choose_id = pdr->pdi.f_teid.choose_id;
             if (!teid_lookup_by_choose_id(gtm, choose_id, &teid))
             {
-              chosen = true;
+              teid = generate_teid(gtm->rand_base, res->mask);
+              gtm->rand_base = teid;
             }
+            gtm->choosed_teid[choose_id] = teid;
+            chosen = true;
           }
-          create->pdi.teid = pdr->pdi.f_teid;
           if (!chosen)
           {
-            create->pdi.teid.teid = generate_teid(gtm->rand_base, nwi->mask);
-            gtm->rand_base = create->pdi.teid.teid;
-          } else
-            create->pdi.teid.teid = teid;
-            if (ISSET_BIT (pdr->f_teid.flags, F_TEID_V4))
-              create->pdi.teid.ip4 = res->ip4e
-            if (ISSET_BIT (pdr->f_teid.flags, F_TEID_V6))
-              create->pdi.teid.ip6 = res->ip6;
+            teid = generate_teid(gtm->rand_base, res->mask);
+            gtm->rand_base = teid;
+          }
+          create->pdi.teid.teid = teid;
+          if (ISSET_BIT (pdr->pdi.f_teid.flags, F_TEID_V4))
+            create->pdi.teid.ip4 = res->ip4;
+          if (ISSET_BIT (pdr->pdi.f_teid.flags, F_TEID_V6))
+            create->pdi.teid.ip6 = res->ip6;
         }
 	/* TODO validate TEID and mask
 	   if (nwi->teid != (pdr->pdi.f_teid.teid & nwi->mask))
@@ -1066,7 +1073,6 @@ handle_update_pdr (upf_session_t * sx, pfcp_update_pdr_t * update_pdr,
   vec_foreach (pdr, update_pdr)
   {
     upf_pdr_t *update;
-    upf_nwi_t *nwi = NULL;
     upf_upip_res_t *res;
 
 
@@ -1102,7 +1108,7 @@ handle_update_pdr (upf_session_t * sx, pfcp_update_pdr_t * update_pdr,
     update->precedence = pdr->precedence;
     update->pdi.src_intf = pdr->pdi.source_interface;
 
-    vec_foreach (res, gtw->upip_res)
+    vec_foreach (res, gtm->upip_res)
     {
       if (res->nwi_index == update->pdi.nwi_index)
         break;
@@ -1116,29 +1122,32 @@ handle_update_pdr (upf_session_t * sx, pfcp_update_pdr_t * update_pdr,
 	/* TODO validate TEID and mask */
 	update->pdi.teid = pdr->pdi.f_teid;
         // we only generate F_TEID if NWI is defined for PDR
-        if ((ISSET_BIT (pdi.f_teid.flags), F_TEID_CH) && res)
+        if (ISSET_BIT(pdr->pdi.f_teid.flags, F_TEID_CH) && res)
         {
-          if (ISSET_BIT(pdi.f_teid.flags, F_TEID_CHID))
+          if (ISSET_BIT(pdr->pdi.f_teid.flags, F_TEID_CHID))
           {
-            /*TBD: lookup by chooseid
-            */
-            u8 choose_id = pdi.f_teid.choose_id;
+          /*TBD: lookup by chooseid
+          */
+            u8 choose_id = pdr->pdi.f_teid.choose_id;
             if (!teid_lookup_by_choose_id(gtm, choose_id, &teid))
             {
-              chosen = true;
+              teid = generate_teid(gtm->rand_base, res->mask);
+              gtm->rand_base = teid;
             }
+            gtm->choosed_teid[choose_id] = teid;
+            chosen = true;
           }
           if (!chosen)
           {
-            update->pdi.teid.teid = generate_teid(gtm->rand_base, nwi->mask);
-            gtm->rand_base = update->pdi.teid.teid;
-          } else
-            update->pdi.teid.teid = teid;
-          if (ISSET_BIT (pdr->f_teid.flags, F_TEID_V4))
-            update->pdi.teid.ip4 = res->ip4e;
-          if (ISSET_BIT (pdr->f_teid.flags, F_TEID_V6))
+            teid = generate_teid(gtm->rand_base, res->mask);
+            gtm->rand_base = teid;
+          }
+          update->pdi.teid.teid = teid;
+          if (ISSET_BIT (pdr->pdi.f_teid.flags, F_TEID_V4))
+            update->pdi.teid.ip4 = res->ip4;
+          if (ISSET_BIT (pdr->pdi.f_teid.flags, F_TEID_V6))
             update->pdi.teid.ip6 = res->ip6;
-      }
+        }
     }
 
     if (ISSET_BIT (pdr->pdi.grp.fields, PDI_UE_IP_ADDRESS))
@@ -1255,6 +1264,13 @@ handle_update_pdr (upf_session_t * sx, pfcp_update_pdr_t * update_pdr,
   return r;
 }
 
+static void
+release_teid(pfcp_remove_pdr_t *pdr)
+{
+  //TODO: release teid allocated. Check choose_id first, release if choose_id unset
+  return;
+}
+
 static int
 handle_remove_pdr (upf_session_t * sx, pfcp_remove_pdr_t * remove_pdr,
 		   struct pfcp_group *grp,
@@ -1273,6 +1289,7 @@ handle_remove_pdr (upf_session_t * sx, pfcp_remove_pdr_t * remove_pdr,
 
   vec_foreach (pdr, remove_pdr)
   {
+    release_teid(pdr);
     if ((r = pfcp_delete_pdr (sx, pdr->pdr_id)) != 0)
       {
 	upf_debug ("Failed to remove PDR %d\n", pdr->pdr_id);

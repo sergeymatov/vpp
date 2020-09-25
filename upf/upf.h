@@ -48,6 +48,7 @@
 
 #define ip4_address_initializer { 0 }
 #define ip6_address_initializer {{ 0 }}
+#define UPF_CHOOSEID_MAX 256
 
 /* UPF buffer opaque definition */
 typedef struct
@@ -830,6 +831,7 @@ typedef struct
   u32 f_teid_mask;
   u32 last_used_teid;
   u32 rand_base;
+  u32 choosed_teid[UPF_CHOOSEID_MAX];
 } upf_main_t;
 
 extern const fib_node_vft_t upf_vft;

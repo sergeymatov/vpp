@@ -1582,7 +1582,7 @@ build_pfcp_rules (upf_session_t * sx)
   {
     upf_pdr_t *pdr = vec_elt_at_index (pending->pdr, idx);
     u32 sw_if_index = ~0;
-    upf_nwi_t *nwi = NULL:
+    upf_nwi_t *nwi = NULL;
 
     if (pdr->pdi.nwi_index != ~0)
       {
@@ -1632,15 +1632,6 @@ build_pfcp_rules (upf_session_t * sx)
     /* register Local F-TEIDs */
     if (pdr->pdi.fields & F_PDI_LOCAL_F_TEID)
       {
-        if (pdr->pdi.ted.flags & F_TEID_CH)
-        {
-        /* Here we have to generate TEID and set IPaddr from NWI
-         *
-         *
-         *
-         */
-          pdr->pdi.ted.teid = ftup_generate_teid();
-        }
 	if (pdr->pdi.teid.flags & F_TEID_V4)
 	  rules_add_v4_teid (pending, &pdr->pdi.teid.ip4,
 			     pdr->pdi.teid.teid, idx);
