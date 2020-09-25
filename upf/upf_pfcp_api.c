@@ -32,6 +32,7 @@
 #include <vppinfra/types.h>
 #include <vppinfra/vec.h>
 #include <vppinfra/format.h>
+#include <vppinfra/random.h>
 #include <vnet/fib/ip4_fib.h>
 #include <vnet/fib/ip6_fib.h>
 #include <vnet/ip/ip6_hop_by_hop.h>
@@ -535,14 +536,17 @@ handle_association_setup_request (pfcp_msg_t * req,
 
   SET_BIT (resp.grp.fields, ASSOCIATION_SETUP_RESPONSE_UP_FUNCTION_FEATURES);
   resp.up_function_features |= F_UPFF_EMPU;
-  /* currently no optional features are supported */
-
-  build_user_plane_ip_resource_information
-    (&resp.user_plane_ip_resource_information);
-  if (vec_len (resp.user_plane_ip_resource_information) != 0)
-    SET_BIT (resp.grp.fields,
-	     ASSOCIATION_SETUP_RESPONSE_USER_PLANE_IP_RESOURCE_INFORMATION);
-
+  if (gtm->upf_ftup)
+  {
+    resp.up_function_features |= F_UPFF_FTUP;
+  } else
+  {
+    build_user_plane_ip_resource_information
+      (&resp.user_plane_ip_resource_information);
+    if (vec_len (resp.user_plane_ip_resource_information) != 0)
+      SET_BIT (resp.grp.fields,
+	       ASSOCIATION_SETUP_RESPONSE_USER_PLANE_IP_RESOURCE_INFORMATION);
+  }
   if (r == 0)
     {
       n->heartbeat_handle = upf_pfcp_server_start_timer
@@ -803,6 +807,23 @@ lookup_nwi (u8 * name)
   return pool_elt_at_index (gtm->nwis, p[0]);
 }
 
+static u32
+generate_teid (u32 start, u32 mask)
+{
+  //TBD: put the number to mhash
+  return random_u32(&start) & mask;
+}
+
+static bool
+teid_lookup_by_choose_id(vlib_main_t *vm, u8 choose_id, u32 *teid)
+{
+  //TBD: vlib_main_t will have static array
+  //sized by u8_max. Index will match choose_id, value
+  //matches corresponding teid.
+  *teid = 0;
+  return false;
+}
+
 static int
 handle_create_pdr (upf_session_t * sx, pfcp_create_pdr_t * create_pdr,
 		   struct pfcp_group *grp,
@@ -827,6 +848,8 @@ handle_create_pdr (upf_session_t * sx, pfcp_create_pdr_t * create_pdr,
   vec_foreach (pdr, create_pdr)
   {
     upf_pdr_t *create;
+    upf_nwi_t *nwi = NULL;
+    upf_upip_res_t *res;
 
     vec_add2 (rules->pdr, create, 1);
     memset (create, 0, sizeof (*create));
@@ -840,7 +863,7 @@ handle_create_pdr (upf_session_t * sx, pfcp_create_pdr_t * create_pdr,
 
     if (ISSET_BIT (pdr->pdi.grp.fields, PDI_NETWORK_INSTANCE))
       {
-	upf_nwi_t *nwi = lookup_nwi (pdr->pdi.network_instance);
+	nwi = lookup_nwi (pdr->pdi.network_instance);
 	if (!nwi)
 	  {
 	    upf_debug ("PDR: %d, PDI for unknown network instance\n",
@@ -857,11 +880,47 @@ handle_create_pdr (upf_session_t * sx, pfcp_create_pdr_t * create_pdr,
 	create->pdi.nwi_index = nwi - gtm->nwis;
       }
 
+
+    vec_foreach (res, gtw->upip_res)
+    {
+      if (res->nwi_index == create->pdi.nwi_index)
+        break;
+    }
+
     create->pdi.src_intf = pdr->pdi.source_interface;
 
     if (ISSET_BIT (pdr->pdi.grp.fields, PDI_F_TEID))
       {
+        u32 teid = 0;
+        bool chosen = false;
+
 	create->pdi.fields |= F_PDI_LOCAL_F_TEID;
+        create->pdi.teid = pdr->pdi.f_teid;
+        // We only generate F_TEID if NWI is defined
+        if (ISSET_BIT(pdi.f_teid.flags, F_TEID_CH) && res)
+        {
+          if (ISSET_BIT(pdi.f_teid.flags, F_TEID_CHID))
+          {
+          /*TBD: lookup by chooseid
+          */
+            u8 choose_id = pdi.f_teid.choose_id;
+            if (!teid_lookup_by_choose_id(gtm, choose_id, &teid))
+            {
+              chosen = true;
+            }
+          }
+          create->pdi.teid = pdr->pdi.f_teid;
+          if (!chosen)
+          {
+            create->pdi.teid.teid = generate_teid(gtm->rand_base, nwi->mask);
+            gtm->rand_base = create->pdi.teid.teid;
+          } else
+            create->pdi.teid.teid = teid;
+            if (ISSET_BIT (pdr->f_teid.flags, F_TEID_V4))
+              create->pdi.teid.ip4 = res->ip4e
+            if (ISSET_BIT (pdr->f_teid.flags, F_TEID_V6))
+              create->pdi.teid.ip6 = res->ip6;
+        }
 	/* TODO validate TEID and mask
 	   if (nwi->teid != (pdr->pdi.f_teid.teid & nwi->mask))
 	   {
@@ -872,7 +931,6 @@ handle_create_pdr (upf_session_t * sx, pfcp_create_pdr_t * create_pdr,
 	   break;
 	   }
 	 */
-	create->pdi.teid = pdr->pdi.f_teid;
       }
 
     if (ISSET_BIT (pdr->pdi.grp.fields, PDI_UE_IP_ADDRESS))
@@ -1008,6 +1066,9 @@ handle_update_pdr (upf_session_t * sx, pfcp_update_pdr_t * update_pdr,
   vec_foreach (pdr, update_pdr)
   {
     upf_pdr_t *update;
+    upf_nwi_t *nwi = NULL;
+    upf_upip_res_t *res;
+
 
     update = pfcp_get_pdr (sx, PFCP_PENDING, pdr->pdr_id);
     if (!update)
@@ -1041,12 +1102,44 @@ handle_update_pdr (upf_session_t * sx, pfcp_update_pdr_t * update_pdr,
     update->precedence = pdr->precedence;
     update->pdi.src_intf = pdr->pdi.source_interface;
 
+    vec_foreach (res, gtw->upip_res)
+    {
+      if (res->nwi_index == update->pdi.nwi_index)
+        break;
+    }
+
     if (ISSET_BIT (pdr->pdi.grp.fields, PDI_F_TEID))
       {
+        u32 teid = 0;
+        bool chosen = false;
 	update->pdi.fields |= F_PDI_LOCAL_F_TEID;
 	/* TODO validate TEID and mask */
 	update->pdi.teid = pdr->pdi.f_teid;
+        // we only generate F_TEID if NWI is defined for PDR
+        if ((ISSET_BIT (pdi.f_teid.flags), F_TEID_CH) && res)
+        {
+          if (ISSET_BIT(pdi.f_teid.flags, F_TEID_CHID))
+          {
+            /*TBD: lookup by chooseid
+            */
+            u8 choose_id = pdi.f_teid.choose_id;
+            if (!teid_lookup_by_choose_id(gtm, choose_id, &teid))
+            {
+              chosen = true;
+            }
+          }
+          if (!chosen)
+          {
+            update->pdi.teid.teid = generate_teid(gtm->rand_base, nwi->mask);
+            gtm->rand_base = update->pdi.teid.teid;
+          } else
+            update->pdi.teid.teid = teid;
+          if (ISSET_BIT (pdr->f_teid.flags, F_TEID_V4))
+            update->pdi.teid.ip4 = res->ip4e;
+          if (ISSET_BIT (pdr->f_teid.flags, F_TEID_V6))
+            update->pdi.teid.ip6 = res->ip6;
       }
+    }
 
     if (ISSET_BIT (pdr->pdi.grp.fields, PDI_UE_IP_ADDRESS))
       {

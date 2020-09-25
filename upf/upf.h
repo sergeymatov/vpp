@@ -18,6 +18,8 @@
 #ifndef __included_upf_h__
 #define __included_upf_h__
 
+#include <time.h>
+
 #include <vppinfra/lock.h>
 #include <vppinfra/error.h>
 #include <vppinfra/hash.h>
@@ -769,6 +771,9 @@ typedef struct
   upf_upip_res_t *upip_res;
   mhash_t upip_res_index;
 
+  /* teid availability table */
+  mhash_t teid_index;
+
   /* vector of encap tunnel instances */
   upf_session_t *sessions;
 
@@ -819,6 +824,12 @@ typedef struct
   uword *upf_app_by_name;
   /* adf apps vector */
   upf_adf_app_t *upf_apps;
+
+  //TODO: Change to UPF flags?
+  bool upf_ftup;
+  u32 f_teid_mask;
+  u32 last_used_teid;
+  u32 rand_base;
 } upf_main_t;
 
 extern const fib_node_vft_t upf_vft;
