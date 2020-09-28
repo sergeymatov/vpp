@@ -7514,6 +7514,7 @@ decode_group (u8 * p, int len, const struct pfcp_ie_def *grp_def,
 
   if ((grp->fields & grp_def->mandatory) != grp_def->mandatory)
     {
+      pfcp_debug ("SMATOV:\n checking IE: %U", format_pfcp_ie, ie);
       u32 missing = ~grp->fields & grp_def->mandatory;
 
       pfcp_debug

@@ -539,8 +539,10 @@ handle_association_setup_request (pfcp_msg_t * req,
   if (gtm->upf_ftup)
   {
     resp.up_function_features |= F_UPFF_FTUP;
+    fformat(stderr, "SMATOV: Register FTUP in association request\n");
   } else
   {
+    fformat(stderr, "SMATOV: Register UPIP!!!! in association request\n");
     build_user_plane_ip_resource_information
       (&resp.user_plane_ip_resource_information);
     if (vec_len (resp.user_plane_ip_resource_information) != 0)
@@ -832,13 +834,13 @@ teid_lookup_by_choose_id(upf_main_t *gtm, u8 choose_id, u32 *teid)
 
 static int
 handle_create_pdr (upf_session_t * sx, pfcp_create_pdr_t * create_pdr,
-		   struct pfcp_group *grp,
+		   pfcp_session_establishment_response_t *resp,
 		   int failed_rule_id_field,
 		   pfcp_failed_rule_id_t * failed_rule_id)
 {
+  struct pfcp_group *grp = &resp->grp;
   struct pfcp_response *response = (struct pfcp_response *) (grp + 1);
   upf_main_t *gtm = &upf_main;
-  pfcp_create_pdr_t *pdr;
   struct rules *rules;
   int r = 0;
 
@@ -850,13 +852,19 @@ handle_create_pdr (upf_session_t * sx, pfcp_create_pdr_t * create_pdr,
 
   rules = pfcp_get_rules (sx, PFCP_PENDING);
   vec_alloc (rules->pdr, vec_len (create_pdr));
+  vec_alloc (resp->created_pdr, vec_len (create_pdr));
 
   vec_foreach (pdr, create_pdr)
   {
+    fformat (stderr,
+                     "SMATOV:\n PDR: %d, application id %v configuration started\n",
+                     pdr->pdr_id, pdr->pdi.application_id);
     upf_pdr_t *create;
     upf_upip_res_t *res;
+    pfcp_created_pdr_t *created_pdr;
 
     vec_add2 (rules->pdr, create, 1);
+    vec_add1 (resp->created_pdr, create);
     memset (create, 0, sizeof (*create));
 
     create->pdi.nwi_index = ~0;
@@ -896,6 +904,9 @@ handle_create_pdr (upf_session_t * sx, pfcp_create_pdr_t * create_pdr,
 
     if (ISSET_BIT (pdr->pdi.grp.fields, PDI_F_TEID))
       {
+        fformat (stderr,
+                     "SMATOV:\n PDR: %d, F_TEID field is found, nwi idx = %d \n",
+                     pdr->pdr_id, res->nwi_index);
         u32 teid = 0;
         bool chosen = false;
 
@@ -904,10 +915,16 @@ handle_create_pdr (upf_session_t * sx, pfcp_create_pdr_t * create_pdr,
         // We only generate F_TEID if NWI is defined
         if (ISSET_BIT(pdr->pdi.f_teid.flags, F_TEID_CH) && res)
         {
+        fformat (stderr,
+                     "SMATOV:\n PDR: %d, CH flag found, nwi idx = %d \n",
+                     pdr->pdr_id, res->nwi_index);
           if (ISSET_BIT(pdr->pdi.f_teid.flags, F_TEID_CHID))
           {
           /*TBD: lookup by chooseid
           */
+            fformat (stderr,
+                     "SMATOV:\n PDR: %d, CHID flag found, choose_id = %d\n",
+                     pdr->pdr_id,  pdr->pdi.f_teid.choose_id);
             u8 choose_id = pdr->pdi.f_teid.choose_id;
             if (!teid_lookup_by_choose_id(gtm, choose_id, &teid))
             {
@@ -923,10 +940,16 @@ handle_create_pdr (upf_session_t * sx, pfcp_create_pdr_t * create_pdr,
             gtm->rand_base = teid;
           }
           create->pdi.teid.teid = teid;
+          fformat (stderr,
+                     "SMATOV:\n PDR: %d, Generated TEID, %d\n",
+                     pdr->pdr_id,  teid);
           if (ISSET_BIT (pdr->pdi.f_teid.flags, F_TEID_V4))
             create->pdi.teid.ip4 = res->ip4;
           if (ISSET_BIT (pdr->pdi.f_teid.flags, F_TEID_V6))
             create->pdi.teid.ip6 = res->ip6;
+          fformat (stderr,
+                     "SMATOV:\n PDR: %d, created teid %v \n",
+                     pdr->pdr_id, create->pdi.teid);
         }
 	/* TODO validate TEID and mask
 	   if (nwi->teid != (pdr->pdi.f_teid.teid & nwi->mask))
@@ -1037,6 +1060,9 @@ handle_create_pdr (upf_session_t * sx, pfcp_create_pdr_t * create_pdr,
 	}
       }
 
+    created_pdr->pdr_id = create->id;
+    created_pdr->f_teid = create->pdi.teid.teid;
+
     // CREATE_PDR_ACTIVATE_PREDEFINED_RULES
   }
 
@@ -1055,10 +1081,12 @@ handle_create_pdr (upf_session_t * sx, pfcp_create_pdr_t * create_pdr,
 
 static int
 handle_update_pdr (upf_session_t * sx, pfcp_update_pdr_t * update_pdr,
+                   pfcp_session_modification_response_t *resp,
 		   struct pfcp_group *grp,
 		   int failed_rule_id_field,
 		   pfcp_failed_rule_id_t * failed_rule_id)
 {
+  struct pfcp_group *grp = &resp->grp;
   struct pfcp_response *response = (struct pfcp_response *) (grp + 1);
   upf_main_t *gtm = &upf_main;
   pfcp_update_pdr_t *pdr;
@@ -1070,11 +1098,14 @@ handle_update_pdr (upf_session_t * sx, pfcp_update_pdr_t * update_pdr,
       return r;
     }
 
+  vec_alloc (resp->created_pdr, vec_len (update_pdr));
+
   vec_foreach (pdr, update_pdr)
   {
     upf_pdr_t *update;
     upf_upip_res_t *res;
-
+    pfcp_created_pdr_t *updated_pdr;
+    vec_add1 (resp->created_pdr, updated_pdr);
 
     update = pfcp_get_pdr (sx, PFCP_PENDING, pdr->pdr_id);
     if (!update)
@@ -1085,6 +1116,8 @@ handle_update_pdr (upf_session_t * sx, pfcp_update_pdr_t * update_pdr,
 	r = -1;
 	break;
       }
+
+    vec_add1 (resp->created_pdr, update);
 
     if (ISSET_BIT (pdr->pdi.grp.fields, PDI_NETWORK_INSTANCE))
       {
@@ -1249,6 +1282,9 @@ handle_update_pdr (upf_session_t * sx, pfcp_update_pdr_t * update_pdr,
 	  vec_add1 (update->qer_ids, *qer_id);
 	}
       }
+
+    updated_pdr->pdr_id = update->id;
+    updated_pdr->f_teid = update->pdi.teid.teid;
 
     // UPDATE_PDR_ACTIVATE_PREDEFINED_RULES
   }
@@ -2536,7 +2572,7 @@ handle_session_establishment_request (pfcp_msg_t * req,
       pending->inactivity_timer.handle = ~0;
     }
 
-  if ((r = handle_create_pdr (sess, msg->create_pdr, &resp.grp,
+  if ((r = handle_create_pdr (sess, msg->create_pdr, &resp,
 			      SESSION_ESTABLISHMENT_RESPONSE_FAILED_RULE_ID,
 			      &resp.failed_rule_id)) != 0)
     goto out_send_resp;
@@ -2645,7 +2681,7 @@ handle_session_modification_request (pfcp_msg_t * req,
 	  pending->inactivity_timer.handle = ~0;
 	}
 
-      if ((r = handle_create_pdr (sess, msg->create_pdr, &resp.grp,
+      if ((r = handle_create_pdr (sess, msg->create_pdr, &resp,
 				  SESSION_MODIFICATION_RESPONSE_FAILED_RULE_ID,
 				  &resp.failed_rule_id)) != 0)
 	goto out_send_resp;
