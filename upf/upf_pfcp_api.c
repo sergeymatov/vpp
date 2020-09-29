@@ -812,36 +812,68 @@ lookup_nwi (u8 * name)
 static u32
 generate_teid (u32 start, u32 mask)
 {
-  //TBD: put the number to mhash
   u32 tmp = random_u32(&start) & mask;
   return tmp;
 }
 
-static bool
-teid_lookup_by_choose_id(upf_main_t *gtm, u8 choose_id, u32 *teid)
+static int
+teid_add_dell (upf_main_t *gtm, u32 teid, u8 add)
 {
-  //TBD: vlib_main_t will have static array
-  //sized by u8_max. Index will match choose_id, value
-  //matches corresponding teid.
-  if(gtm->choosed_teid[choose_id])
+  p = hash_get(gtm->teid_table, teid)
+
+  if (add)
   {
-    *teid = gtm->choosed_teid[choose_id];
-    return true;
+    if (p)
+      return VNET_API_ERROR_VALUE_EXIST;
+
+    hash_set (gtm->teid_table, teid, teid);
+  } else
+  {
+    if (!p)
+      return VNET_API_ERROR_NO_SUCH_ENTRY;
+    hash_unset(gtm->teid_table, teid);
   }
-  *teid = 0;
-  return false;
+  return 0;
+}
+
+static void
+teid_add_dell_by_choose_id (upf_session_t *sx, u8 choose_id, u32 teid, u8 add)
+{
+  p = hash_get(sx->teid_by_choose_id_table, choose_id)
+
+  if (add)
+  {
+    hash_set (sx->teid_by_choose_id_table, choose_id, teid);
+  } else
+  {
+    hash_unset(sx->teid_by_choose_id_table, teid);
+  }
+  return 0;
+}
+
+static u32
+teid_lookup_by_choose_id (upf_session_t *sx, u8 choose_id)
+{
+
+  p = hash_get(sx->teid_by_choose_id_table, choose_id)
+
+  if (p)
+    return p;
+
+  return 0;
 }
 
 static int
 handle_create_pdr (upf_session_t * sx, pfcp_create_pdr_t * create_pdr,
-		   pfcp_session_establishment_response_t *resp,
+		   struct pfcp_group *grp,
+		   pfcp_created_pdr_t *created_pdr_vec,
 		   int failed_rule_id_field,
 		   pfcp_failed_rule_id_t * failed_rule_id)
 {
-  struct pfcp_group *grp = &resp->grp;
   struct pfcp_response *response = (struct pfcp_response *) (grp + 1);
   upf_main_t *gtm = &upf_main;
   struct rules *rules;
+  pfcp_create_pdr_t *pdr;
   int r = 0;
 
   if ((r = pfcp_make_pending_pdr (sx)) != 0)
@@ -852,7 +884,7 @@ handle_create_pdr (upf_session_t * sx, pfcp_create_pdr_t * create_pdr,
 
   rules = pfcp_get_rules (sx, PFCP_PENDING);
   vec_alloc (rules->pdr, vec_len (create_pdr));
-  vec_alloc (resp->created_pdr, vec_len (create_pdr));
+  vec_alloc (created_pdr_vec, vec_len(create_pdr)); 
 
   vec_foreach (pdr, create_pdr)
   {
@@ -864,8 +896,9 @@ handle_create_pdr (upf_session_t * sx, pfcp_create_pdr_t * create_pdr,
     pfcp_created_pdr_t *created_pdr;
 
     vec_add2 (rules->pdr, create, 1);
-    vec_add1 (resp->created_pdr, create);
+    vec_add2 (created_pdr_vec, created_pdr, 1);
     memset (create, 0, sizeof (*create));
+    memset (created_pdr, 0, sizeof (*created_pdr));
 
     create->pdi.nwi_index = ~0;
     create->pdi.adr.application_id = ~0;
@@ -909,39 +942,60 @@ handle_create_pdr (upf_session_t * sx, pfcp_create_pdr_t * create_pdr,
                      pdr->pdr_id, res->nwi_index);
         u32 teid = 0;
         bool chosen = false;
+        u8 choose_id = 0;
 
 	create->pdi.fields |= F_PDI_LOCAL_F_TEID;
         create->pdi.teid = pdr->pdi.f_teid;
+        upf_debug("SMATOV: DUMP INCOMING TEID\n: teid=%d ch=%d chid=%d choose_id=%d\n", pdr->pdi.f_teid.teid,
+		(pdr->pdi.f_teid.flags & F_TEID_CH), (pdr->pdi.f_teid.flags & F_TEID_CHID), (pdr->pdi.f_teid.choose_id));
         // We only generate F_TEID if NWI is defined
-        if (ISSET_BIT(pdr->pdi.f_teid.flags, F_TEID_CH) && res)
+        if ((pdr->pdi.f_teid.flags & F_TEID_CH) && res)
         {
-        fformat (stderr,
+          fformat (stderr,
                      "SMATOV:\n PDR: %d, CH flag found, nwi idx = %d \n",
                      pdr->pdr_id, res->nwi_index);
-          if (ISSET_BIT(pdr->pdi.f_teid.flags, F_TEID_CHID))
+          if ((pdr->pdi.f_teid.flags & F_TEID_CHID))
           {
-          /*TBD: lookup by chooseid
-          */
             fformat (stderr,
                      "SMATOV:\n PDR: %d, CHID flag found, choose_id = %d\n",
                      pdr->pdr_id,  pdr->pdi.f_teid.choose_id);
             u8 choose_id = pdr->pdi.f_teid.choose_id;
-            if (!teid_lookup_by_choose_id(gtm, choose_id, &teid))
+            teid = teid_lookup_by_choose_id(sx, choose_id);
+            if (teid)
             {
-              teid = generate_teid(gtm->rand_base, res->mask);
-              gtm->rand_base = teid;
+              upf_debug("SMATOV: Done lookup by chid, teid = %d\n", teid);
+              chosen = true;
             }
-            gtm->choosed_teid[choose_id] = teid;
-            chosen = true;
           }
           if (!chosen)
           {
-            teid = generate_teid(gtm->rand_base, res->mask);
+ 	    bool added = false;
+	    teid = generate_teid(gtm->rand_base, res->mask);
+            for (int i = 0; i < 10; i++)
+            {
+              if (teid_add_del (gtm, teid, 1/*add*/))
+              {
+                teid = generate_teid(teid + ( i + 1 ), res->mask);
+              } else
+              {
+                added = true;
+                break;
+              }
+	    }
+            if (!added)
+            {
+              //we are fucked, can't generate TEID
+              r = 1;
+            }
             gtm->rand_base = teid;
+            if ((pdr->pdi.f_teid.flags & F_TEID_CHID) && choose_id)
+	    {
+              teid_add_dell_by_choose_id(sx, choose_id, teid, 1 /*add*/);
+            }
           }
           create->pdi.teid.teid = teid;
           fformat (stderr,
-                     "SMATOV:\n PDR: %d, Generated TEID, %d\n",
+                     "SMATOV:\n PDR: %d, Generated TEID, %u\n",
                      pdr->pdr_id,  teid);
           if (ISSET_BIT (pdr->pdi.f_teid.flags, F_TEID_V4))
             create->pdi.teid.ip4 = res->ip4;
@@ -1061,7 +1115,7 @@ handle_create_pdr (upf_session_t * sx, pfcp_create_pdr_t * create_pdr,
       }
 
     created_pdr->pdr_id = create->id;
-    created_pdr->f_teid = create->pdi.teid.teid;
+    created_pdr->f_teid = create->pdi.teid;
 
     // CREATE_PDR_ACTIVATE_PREDEFINED_RULES
   }
@@ -1081,12 +1135,11 @@ handle_create_pdr (upf_session_t * sx, pfcp_create_pdr_t * create_pdr,
 
 static int
 handle_update_pdr (upf_session_t * sx, pfcp_update_pdr_t * update_pdr,
-                   pfcp_session_modification_response_t *resp,
-		   struct pfcp_group *grp,
+                   struct pfcp_group *grp,
+                   pfcp_created_pdr_t *created_pdr_vec,		   
 		   int failed_rule_id_field,
 		   pfcp_failed_rule_id_t * failed_rule_id)
 {
-  struct pfcp_group *grp = &resp->grp;
   struct pfcp_response *response = (struct pfcp_response *) (grp + 1);
   upf_main_t *gtm = &upf_main;
   pfcp_update_pdr_t *pdr;
@@ -1098,14 +1151,15 @@ handle_update_pdr (upf_session_t * sx, pfcp_update_pdr_t * update_pdr,
       return r;
     }
 
-  vec_alloc (resp->created_pdr, vec_len (update_pdr));
+  vec_alloc (created_pdr_vec, vec_len (update_pdr));
 
   vec_foreach (pdr, update_pdr)
   {
     upf_pdr_t *update;
     upf_upip_res_t *res;
     pfcp_created_pdr_t *updated_pdr;
-    vec_add1 (resp->created_pdr, updated_pdr);
+    vec_add2 (created_pdr_vec, updated_pdr, 1);
+    memset(updated_pdr, 0, sizeof (*updated_pdr));
 
     update = pfcp_get_pdr (sx, PFCP_PENDING, pdr->pdr_id);
     if (!update)
@@ -1116,8 +1170,6 @@ handle_update_pdr (upf_session_t * sx, pfcp_update_pdr_t * update_pdr,
 	r = -1;
 	break;
       }
-
-    vec_add1 (resp->created_pdr, update);
 
     if (ISSET_BIT (pdr->pdi.grp.fields, PDI_NETWORK_INSTANCE))
       {
@@ -1284,7 +1336,7 @@ handle_update_pdr (upf_session_t * sx, pfcp_update_pdr_t * update_pdr,
       }
 
     updated_pdr->pdr_id = update->id;
-    updated_pdr->f_teid = update->pdi.teid.teid;
+    updated_pdr->f_teid = update->pdi.teid;
 
     // UPDATE_PDR_ACTIVATE_PREDEFINED_RULES
   }
@@ -2572,7 +2624,7 @@ handle_session_establishment_request (pfcp_msg_t * req,
       pending->inactivity_timer.handle = ~0;
     }
 
-  if ((r = handle_create_pdr (sess, msg->create_pdr, &resp,
+  if ((r = handle_create_pdr (sess, msg->create_pdr, &resp.grp, resp.created_pdr,
 			      SESSION_ESTABLISHMENT_RESPONSE_FAILED_RULE_ID,
 			      &resp.failed_rule_id)) != 0)
     goto out_send_resp;
@@ -2681,12 +2733,12 @@ handle_session_modification_request (pfcp_msg_t * req,
 	  pending->inactivity_timer.handle = ~0;
 	}
 
-      if ((r = handle_create_pdr (sess, msg->create_pdr, &resp,
+      if ((r = handle_create_pdr (sess, msg->create_pdr, &resp.grp, resp.created_pdr,
 				  SESSION_MODIFICATION_RESPONSE_FAILED_RULE_ID,
 				  &resp.failed_rule_id)) != 0)
 	goto out_send_resp;
 
-      if ((r = handle_update_pdr (sess, msg->update_pdr, &resp.grp,
+      if ((r = handle_update_pdr (sess, msg->update_pdr, &resp.grp, resp.created_pdr,
 				  SESSION_MODIFICATION_RESPONSE_FAILED_RULE_ID,
 				  &resp.failed_rule_id)) != 0)
 	goto out_send_resp;

@@ -359,9 +359,14 @@ upf_init (vlib_main_t * vm)
 					FIB_SOURCE_PRIORITY_HI,
 					FIB_SOURCE_BH_SIMPLE);
   sm->upf_ftup = true;
-  sm->f_teid_mask = 0xff;
-  sm->last_used_teid = 1;
-  sm->rand_base = (u32) ( unix_time_now () );
+  time_t t;
+  srand((unsigned) time(&t));
+
+  f64 base = vlib_time_now (sm->vlib_main);
+  sm->rand_base = (u32) (base % rand());
+
+  sm->teid_table = hash_create ( /* initial length */ 32, sizeof (u32));
+  
 
   error = flowtable_init (vm);
   if (error)

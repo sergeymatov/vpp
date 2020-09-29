@@ -629,6 +629,9 @@ typedef struct
   /* DPO locks */
   u32 dpo_locks;
 
+  /* TEID table by choose_id */
+  u32 *teid_by_choose_id_table;
+
   f64 unix_time_start;
 } upf_session_t;
 
@@ -773,7 +776,7 @@ typedef struct
   mhash_t upip_res_index;
 
   /* teid availability table */
-  mhash_t teid_index;
+  u32 *teid_index;
 
   /* vector of encap tunnel instances */
   upf_session_t *sessions;
@@ -828,8 +831,6 @@ typedef struct
 
   //TODO: Change to UPF flags?
   bool upf_ftup;
-  u32 f_teid_mask;
-  u32 last_used_teid;
   u32 rand_base;
   u32 choosed_teid[UPF_CHOOSEID_MAX];
 } upf_main_t;

@@ -541,6 +541,9 @@ pfcp_create_session (upf_node_assoc_t * assoc,
   node_assoc_attach_session (assoc, sx);
   hash_set (gtm->session_by_id, cp_seid, sx - gtm->sessions);
 
+  /*Init TEID by choose_id hash lookup table */
+  sx->teid_by_choose_id_table = hash_create(/*Initial length */ 32, sizeof (u32));
+
   vlib_worker_thread_barrier_release (vm);
 
   return sx;
@@ -1045,6 +1048,8 @@ pfcp_free_session (upf_session_t * sx)
   for (size_t i = 0; i < ARRAY_LEN (sx->rules); i++)
     pfcp_free_rules (sx, i);
 
+
+  hash_free(sx->teid_by_choose_id_table);
   clib_spinlock_free (&sx->lock);
   pool_put (gtm->sessions, sx);
 

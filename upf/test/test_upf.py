@@ -1004,7 +1004,7 @@ class TestPGWBase(PFCPHelper):
                     "any to assigned"),
                 IE_SourceInterface(interface="Access"),
                 self.ie_ue_ip_address(),
-                self.ie_fteid_ch(),
+                self.ie_fteid(),
             ]),
             IE_PDR_Id(id=1),
             IE_Precedence(precedence=200),

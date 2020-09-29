@@ -794,12 +794,15 @@ decode_f_teid (u8 * data, u16 length, void *p)
 {
   pfcp_f_teid_t *v = p;
 
-  if (length < 5)
-    return PFCP_CAUSE_INVALID_LENGTH;
+//  if (length < 5)
+//   return PFCP_CAUSE_INVALID_LENGTH;
 
   v->flags = get_u8 (data) & 0x0f;
-  v->teid = get_u32 (data);
-  length -= 5;
+  if (!(v->flags & F_TEID_CH))
+  {
+    v->teid = get_u32 (data);
+    length -= 5;
+  }
 
   if (v->flags & F_TEID_CH)
     {
@@ -7514,7 +7517,6 @@ decode_group (u8 * p, int len, const struct pfcp_ie_def *grp_def,
 
   if ((grp->fields & grp_def->mandatory) != grp_def->mandatory)
     {
-      pfcp_debug ("SMATOV:\n checking IE: %U", format_pfcp_ie, ie);
       u32 missing = ~grp->fields & grp_def->mandatory;
 
       pfcp_debug
