@@ -776,7 +776,7 @@ typedef struct
   mhash_t upip_res_index;
 
   /* teid availability table */
-  u32 *teid_index;
+  u32 *teid_table;
 
   /* vector of encap tunnel instances */
   upf_session_t *sessions;

@@ -313,7 +313,6 @@ upf_init (vlib_main_t * vm)
   sm->nwi_index_by_name =
     hash_create_vec ( /* initial length */ 32, sizeof (u8), sizeof (uword));
   mhash_init (&sm->upip_res_index, sizeof (uword), sizeof (upf_upip_res_t));
-  mhash_init (&sm->teid_index, sizeof (uword), sizeof (u32));
 
   /* initialize the IP/TEID hash's */
   clib_bihash_init_8_8 (&sm->v4_tunnel_by_key,
@@ -363,7 +362,7 @@ upf_init (vlib_main_t * vm)
   srand((unsigned) time(&t));
 
   f64 base = vlib_time_now (sm->vlib_main);
-  sm->rand_base = (u32) (base % rand());
+  sm->rand_base = (u32) (base * rand());
 
   sm->teid_table = hash_create ( /* initial length */ 32, sizeof (u32));
   

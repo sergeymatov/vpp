@@ -62,9 +62,6 @@ static void pfcp_add_del_v4_tdf (const void *tdf, void *si, int is_add);
 static void pfcp_add_del_v6_tdf (const void *tdf, void *si, int is_add);
 u8 *format_upf_acl (u8 * s, va_list * args);
 
-#define vec_bsearch(k, v, compar)				\
-	bsearch((k), (v), vec_len((v)), sizeof((v)[0]), compar)
-
 static u8 *
 format_upf_device_name (u8 * s, va_list * args)
 {
@@ -260,7 +257,7 @@ vnet_upf_nwi_add_del (u8 * name, u32 ip4_table_id, u32 ip6_table_id, u8 add)
     vnet_upf_delete_nwi_if (name, NULL);
 }
 
-static int
+int
 pfcp_pdr_id_compare (const void *p1, const void *p2)
 {
   const upf_pdr_t *a = (upf_pdr_t *) p1;
@@ -305,7 +302,7 @@ pfcp_pdr_id_compare (const void *p1, const void *p2)
 	add_del(&vec_elt(old, _j), user, 0);				\
   } while (0)
 
-static int
+int
 pfcp_far_id_compare (const void *p1, const void *p2)
 {
   const upf_far_t *a = (upf_far_t *) p1;
@@ -315,7 +312,7 @@ pfcp_far_id_compare (const void *p1, const void *p2)
   return intcmp (a->id, b->id);
 }
 
-static int
+int
 pfcp_urr_id_compare (const void *p1, const void *p2)
 {
   const upf_urr_t *a = (upf_urr_t *) p1;
@@ -325,7 +322,7 @@ pfcp_urr_id_compare (const void *p1, const void *p2)
   return intcmp (a->id, b->id);
 }
 
-static int
+int
 pfcp_qer_id_compare (const void *p1, const void *p2)
 {
   const upf_qer_t *a = (upf_qer_t *) p1;

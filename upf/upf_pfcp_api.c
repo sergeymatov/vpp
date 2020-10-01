@@ -539,10 +539,8 @@ handle_association_setup_request (pfcp_msg_t * req,
   if (gtm->upf_ftup)
   {
     resp.up_function_features |= F_UPFF_FTUP;
-    fformat(stderr, "SMATOV: Register FTUP in association request\n");
   } else
   {
-    fformat(stderr, "SMATOV: Register UPIP!!!! in association request\n");
     build_user_plane_ip_resource_information
       (&resp.user_plane_ip_resource_information);
     if (vec_len (resp.user_plane_ip_resource_information) != 0)
@@ -812,14 +810,14 @@ lookup_nwi (u8 * name)
 static u32
 generate_teid (u32 start, u32 mask)
 {
-  u32 tmp = random_u32(&start) & mask;
+  u32 tmp = random_u32(&start) & (UINT32_MAX ^ mask);
   return tmp;
 }
 
 static int
-teid_add_dell (upf_main_t *gtm, u32 teid, u8 add)
+teid_add_del (upf_main_t *gtm, u32 teid, u8 add)
 {
-  p = hash_get(gtm->teid_table, teid)
+  uword *p = hash_get(gtm->teid_table, teid);
 
   if (add)
   {
@@ -837,10 +835,8 @@ teid_add_dell (upf_main_t *gtm, u32 teid, u8 add)
 }
 
 static void
-teid_add_dell_by_choose_id (upf_session_t *sx, u8 choose_id, u32 teid, u8 add)
+teid_add_del_by_choose_id (upf_session_t *sx, u8 choose_id, u32 teid, u8 add)
 {
-  p = hash_get(sx->teid_by_choose_id_table, choose_id)
-
   if (add)
   {
     hash_set (sx->teid_by_choose_id_table, choose_id, teid);
@@ -848,17 +844,16 @@ teid_add_dell_by_choose_id (upf_session_t *sx, u8 choose_id, u32 teid, u8 add)
   {
     hash_unset(sx->teid_by_choose_id_table, teid);
   }
-  return 0;
 }
 
 static u32
 teid_lookup_by_choose_id (upf_session_t *sx, u8 choose_id)
 {
 
-  p = hash_get(sx->teid_by_choose_id_table, choose_id)
+  uword *p = hash_get(sx->teid_by_choose_id_table, choose_id);
 
   if (p)
-    return p;
+    return p[0];
 
   return 0;
 }
@@ -866,7 +861,7 @@ teid_lookup_by_choose_id (upf_session_t *sx, u8 choose_id)
 static int
 handle_create_pdr (upf_session_t * sx, pfcp_create_pdr_t * create_pdr,
 		   struct pfcp_group *grp,
-		   pfcp_created_pdr_t *created_pdr_vec,
+		   pfcp_created_pdr_t **created_pdr_vec,
 		   int failed_rule_id_field,
 		   pfcp_failed_rule_id_t * failed_rule_id)
 {
@@ -884,21 +879,15 @@ handle_create_pdr (upf_session_t * sx, pfcp_create_pdr_t * create_pdr,
 
   rules = pfcp_get_rules (sx, PFCP_PENDING);
   vec_alloc (rules->pdr, vec_len (create_pdr));
-  vec_alloc (created_pdr_vec, vec_len(create_pdr)); 
+  vec_alloc (*created_pdr_vec, vec_len(create_pdr));
 
   vec_foreach (pdr, create_pdr)
   {
-    fformat (stderr,
-                     "SMATOV:\n PDR: %d, application id %v configuration started\n",
-                     pdr->pdr_id, pdr->pdi.application_id);
     upf_pdr_t *create;
     upf_upip_res_t *res;
-    pfcp_created_pdr_t *created_pdr;
 
     vec_add2 (rules->pdr, create, 1);
-    vec_add2 (created_pdr_vec, created_pdr, 1);
     memset (create, 0, sizeof (*create));
-    memset (created_pdr, 0, sizeof (*created_pdr));
 
     create->pdi.nwi_index = ~0;
     create->pdi.adr.application_id = ~0;
@@ -935,37 +924,37 @@ handle_create_pdr (upf_session_t * sx, pfcp_create_pdr_t * create_pdr,
 
     create->pdi.src_intf = pdr->pdi.source_interface;
 
+    if (ISSET_BIT (pdr->pdi.grp.fields, PDI_UE_IP_ADDRESS))
+      {
+        create->pdi.fields |= F_PDI_UE_IP_ADDR;
+        create->pdi.ue_addr = pdr->pdi.ue_ip_address;
+
+        if (!ISSET_BIT (pdr->pdi.grp.fields, PDI_SDF_FILTER) &&
+            !ISSET_BIT (pdr->pdi.grp.fields, PDI_APPLICATION_ID))
+          {
+            /* neither SDF, nor Application Id, generate a wildcard
+               ACL to make ACL scanning simpler */
+            create->pdi.fields |= F_PDI_SDF_FILTER;
+            vec_add1 (create->pdi.acl, wildcard_acl);
+          }
+      }
+
     if (ISSET_BIT (pdr->pdi.grp.fields, PDI_F_TEID))
       {
-        fformat (stderr,
-                     "SMATOV:\n PDR: %d, F_TEID field is found, nwi idx = %d \n",
-                     pdr->pdr_id, res->nwi_index);
         u32 teid = 0;
         bool chosen = false;
         u8 choose_id = 0;
 
 	create->pdi.fields |= F_PDI_LOCAL_F_TEID;
-        create->pdi.teid = pdr->pdi.f_teid;
-        upf_debug("SMATOV: DUMP INCOMING TEID\n: teid=%d ch=%d chid=%d choose_id=%d\n", pdr->pdi.f_teid.teid,
-		(pdr->pdi.f_teid.flags & F_TEID_CH), (pdr->pdi.f_teid.flags & F_TEID_CHID), (pdr->pdi.f_teid.choose_id));
         // We only generate F_TEID if NWI is defined
         if ((pdr->pdi.f_teid.flags & F_TEID_CH) && res)
         {
-          fformat (stderr,
-                     "SMATOV:\n PDR: %d, CH flag found, nwi idx = %d \n",
-                     pdr->pdr_id, res->nwi_index);
           if ((pdr->pdi.f_teid.flags & F_TEID_CHID))
           {
-            fformat (stderr,
-                     "SMATOV:\n PDR: %d, CHID flag found, choose_id = %d\n",
-                     pdr->pdr_id,  pdr->pdi.f_teid.choose_id);
             u8 choose_id = pdr->pdi.f_teid.choose_id;
             teid = teid_lookup_by_choose_id(sx, choose_id);
             if (teid)
-            {
-              upf_debug("SMATOV: Done lookup by chid, teid = %d\n", teid);
               chosen = true;
-            }
           }
           if (!chosen)
           {
@@ -984,27 +973,41 @@ handle_create_pdr (upf_session_t * sx, pfcp_create_pdr_t * create_pdr,
 	    }
             if (!added)
             {
-              //we are fucked, can't generate TEID
+              //can't generate TEID
+              upf_debug("Can't generate TEID for pdr=%d\n", pdr->pdr_id);
               r = 1;
             }
             gtm->rand_base = teid;
             if ((pdr->pdi.f_teid.flags & F_TEID_CHID) && choose_id)
 	    {
-              teid_add_dell_by_choose_id(sx, choose_id, teid, 1 /*add*/);
+              teid_add_del_by_choose_id(sx, choose_id, teid, 1 /*add*/);
             }
           }
           create->pdi.teid.teid = teid;
-          fformat (stderr,
-                     "SMATOV:\n PDR: %d, Generated TEID, %u\n",
-                     pdr->pdr_id,  teid);
-          if (ISSET_BIT (pdr->pdi.f_teid.flags, F_TEID_V4))
+          if (!is_zero_ip4_address (&res->ip4)) {
             create->pdi.teid.ip4 = res->ip4;
-          if (ISSET_BIT (pdr->pdi.f_teid.flags, F_TEID_V6))
+            create->pdi.teid.flags |= F_TEID_V4;
+          }
+          if (!is_zero_ip6_address (&res->ip6)) {
+            create->pdi.teid.flags |= F_TEID_V6;
             create->pdi.teid.ip6 = res->ip6;
-          fformat (stderr,
-                     "SMATOV:\n PDR: %d, created teid %v \n",
-                     pdr->pdr_id, create->pdi.teid);
-        }
+          }
+	    pfcp_created_pdr_t *created_pdr;
+	    vec_add2 (*created_pdr_vec, created_pdr, 1);
+	    memset (created_pdr, 0, sizeof (*created_pdr));
+	    created_pdr->pdr_id = create->id;
+	    created_pdr->f_teid = create->pdi.teid;
+	    created_pdr->ue_ip_address = create->pdi.ue_addr;
+	    SET_BIT(created_pdr->grp.fields, CREATED_PDR_PDR_ID);
+	    SET_BIT(created_pdr->grp.fields, CREATED_PDR_F_TEID);
+	    SET_BIT(created_pdr->grp.fields, CREATED_PDR_UE_IP_ADDRESS);
+	    if (!(ISSET_BIT (grp->fields, SESSION_ESTABLISHMENT_RESPONSE_CREATED_PDR)))
+              SET_BIT (grp->fields, SESSION_ESTABLISHMENT_RESPONSE_CREATED_PDR);
+        } else
+        {
+	  // CH == 0
+	  create->pdi.teid = pdr->pdi.f_teid;
+	}
 	/* TODO validate TEID and mask
 	   if (nwi->teid != (pdr->pdi.f_teid.teid & nwi->mask))
 	   {
@@ -1015,21 +1018,6 @@ handle_create_pdr (upf_session_t * sx, pfcp_create_pdr_t * create_pdr,
 	   break;
 	   }
 	 */
-      }
-
-    if (ISSET_BIT (pdr->pdi.grp.fields, PDI_UE_IP_ADDRESS))
-      {
-	create->pdi.fields |= F_PDI_UE_IP_ADDR;
-	create->pdi.ue_addr = pdr->pdi.ue_ip_address;
-
-	if (!ISSET_BIT (pdr->pdi.grp.fields, PDI_SDF_FILTER) &&
-	    !ISSET_BIT (pdr->pdi.grp.fields, PDI_APPLICATION_ID))
-	  {
-	    /* neither SDF, nor Application Id, generate a wildcard
-	       ACL to make ACL scanning simpler */
-	    create->pdi.fields |= F_PDI_SDF_FILTER;
-	    vec_add1 (create->pdi.acl, wildcard_acl);
-	  }
       }
 
     if (ISSET_BIT (pdr->pdi.grp.fields, PDI_SDF_FILTER))
@@ -1114,8 +1102,9 @@ handle_create_pdr (upf_session_t * sx, pfcp_create_pdr_t * create_pdr,
 	}
       }
 
-    created_pdr->pdr_id = create->id;
-    created_pdr->f_teid = create->pdi.teid;
+    //memcpy(&created_pdr->pdr_id, &create->id, sizeof(created_pdr->pdr_id));
+    //memcpy(&created_pdr->f_teid, &create->pdi.teid, sizeof(created_pdr->f_teid));
+    //memcpy(&created_pdr->ue_ip_address, &create->pdi.ue_addr, sizeof(created_pdr->ue_ip_address));
 
     // CREATE_PDR_ACTIVATE_PREDEFINED_RULES
   }
@@ -1136,13 +1125,14 @@ handle_create_pdr (upf_session_t * sx, pfcp_create_pdr_t * create_pdr,
 static int
 handle_update_pdr (upf_session_t * sx, pfcp_update_pdr_t * update_pdr,
                    struct pfcp_group *grp,
-                   pfcp_created_pdr_t *created_pdr_vec,		   
+                   pfcp_created_pdr_t **created_pdr_vec,
 		   int failed_rule_id_field,
 		   pfcp_failed_rule_id_t * failed_rule_id)
 {
   struct pfcp_response *response = (struct pfcp_response *) (grp + 1);
   upf_main_t *gtm = &upf_main;
   pfcp_update_pdr_t *pdr;
+  pfcp_created_pdr_t *created_vec = *created_pdr_vec;
   int r = 0;
 
   if ((r = pfcp_make_pending_pdr (sx)) != 0)
@@ -1151,15 +1141,15 @@ handle_update_pdr (upf_session_t * sx, pfcp_update_pdr_t * update_pdr,
       return r;
     }
 
-  vec_alloc (created_pdr_vec, vec_len (update_pdr));
+  vec_alloc (created_vec, vec_len (update_pdr));
 
   vec_foreach (pdr, update_pdr)
   {
     upf_pdr_t *update;
     upf_upip_res_t *res;
-    pfcp_created_pdr_t *updated_pdr;
-    vec_add2 (created_pdr_vec, updated_pdr, 1);
+    pfcp_created_pdr_t *updated_pdr = NULL;
     memset(updated_pdr, 0, sizeof (*updated_pdr));
+    vec_add1 (created_vec, *updated_pdr);
 
     update = pfcp_get_pdr (sx, PFCP_PENDING, pdr->pdr_id);
     if (!update)
@@ -1193,6 +1183,22 @@ handle_update_pdr (upf_session_t * sx, pfcp_update_pdr_t * update_pdr,
     update->precedence = pdr->precedence;
     update->pdi.src_intf = pdr->pdi.source_interface;
 
+    if (ISSET_BIT (pdr->pdi.grp.fields, PDI_UE_IP_ADDRESS))
+      {
+        update->pdi.fields |= F_PDI_UE_IP_ADDR;
+        update->pdi.ue_addr = pdr->pdi.ue_ip_address;
+
+        if (!ISSET_BIT (pdr->pdi.grp.fields, PDI_SDF_FILTER) &&
+            !ISSET_BIT (pdr->pdi.grp.fields, PDI_APPLICATION_ID))
+          {
+            /* neither SDF, nor Application Id, generate a wildcard
+               ACL to make ACL scanning simpler */
+            update->pdi.fields |= F_PDI_SDF_FILTER;
+            vec_reset_length (update->pdi.acl);
+            vec_add1 (update->pdi.acl, wildcard_acl);
+          }
+      }
+
     vec_foreach (res, gtm->upip_res)
     {
       if (res->nwi_index == update->pdi.nwi_index)
@@ -1203,52 +1209,71 @@ handle_update_pdr (upf_session_t * sx, pfcp_update_pdr_t * update_pdr,
       {
         u32 teid = 0;
         bool chosen = false;
-	update->pdi.fields |= F_PDI_LOCAL_F_TEID;
-	/* TODO validate TEID and mask */
-	update->pdi.teid = pdr->pdi.f_teid;
-        // we only generate F_TEID if NWI is defined for PDR
-        if (ISSET_BIT(pdr->pdi.f_teid.flags, F_TEID_CH) && res)
+        u8 choose_id = 0;
+
+        update->pdi.fields |= F_PDI_LOCAL_F_TEID;
+        // We only generate F_TEID if NWI is defined
+        if ((pdr->pdi.f_teid.flags & F_TEID_CH) && res)
         {
-          if (ISSET_BIT(pdr->pdi.f_teid.flags, F_TEID_CHID))
+          if ((pdr->pdi.f_teid.flags & F_TEID_CHID))
           {
-          /*TBD: lookup by chooseid
-          */
             u8 choose_id = pdr->pdi.f_teid.choose_id;
-            if (!teid_lookup_by_choose_id(gtm, choose_id, &teid))
-            {
-              teid = generate_teid(gtm->rand_base, res->mask);
-              gtm->rand_base = teid;
-            }
-            gtm->choosed_teid[choose_id] = teid;
-            chosen = true;
+            teid = teid_lookup_by_choose_id(sx, choose_id);
+            if (teid)
+              chosen = true;
           }
           if (!chosen)
           {
+            bool added = false;
             teid = generate_teid(gtm->rand_base, res->mask);
+            for (int i = 0; i < 10; i++)
+            {
+              if (teid_add_del (gtm, teid, 1/*add*/))
+              {
+                teid = generate_teid(teid + ( i + 1 ), res->mask);
+              } else
+              {
+                added = true;
+                break;
+              }
+            }
+            if (!added)
+            {
+              //can't generate TEID
+              upf_debug("Can't generate TEID for pdr=%d\n", pdr->pdr_id);
+              r = 1;
+            }
             gtm->rand_base = teid;
+            if ((pdr->pdi.f_teid.flags & F_TEID_CHID) && choose_id)
+            {
+              teid_add_del_by_choose_id(sx, choose_id, teid, 1 /*add*/);
+            }
           }
           update->pdi.teid.teid = teid;
-          if (ISSET_BIT (pdr->pdi.f_teid.flags, F_TEID_V4))
+          if (!is_zero_ip4_address (&res->ip4)) {
             update->pdi.teid.ip4 = res->ip4;
-          if (ISSET_BIT (pdr->pdi.f_teid.flags, F_TEID_V6))
+            update->pdi.teid.flags |= F_TEID_V4;
+          }
+          if (!is_zero_ip6_address (&res->ip6)) {
+            update->pdi.teid.flags |= F_TEID_V6;
             update->pdi.teid.ip6 = res->ip6;
+          }
+            pfcp_created_pdr_t *created_pdr;
+            vec_add2 (*created_pdr_vec, created_pdr, 1);
+            memset (created_pdr, 0, sizeof (*created_pdr));
+            created_pdr->pdr_id = update->id;
+            created_pdr->f_teid = update->pdi.teid;
+            created_pdr->ue_ip_address = update->pdi.ue_addr;
+            SET_BIT(created_pdr->grp.fields, CREATED_PDR_PDR_ID);
+            SET_BIT(created_pdr->grp.fields, CREATED_PDR_F_TEID);
+            SET_BIT(created_pdr->grp.fields, CREATED_PDR_UE_IP_ADDRESS);
+            if (!(ISSET_BIT (grp->fields, SESSION_ESTABLISHMENT_RESPONSE_CREATED_PDR)))
+              SET_BIT (grp->fields, SESSION_ESTABLISHMENT_RESPONSE_CREATED_PDR);
+        } else
+        {
+	  //CH == 0
+	  update->pdi.teid = pdr->pdi.f_teid;
         }
-    }
-
-    if (ISSET_BIT (pdr->pdi.grp.fields, PDI_UE_IP_ADDRESS))
-      {
-	update->pdi.fields |= F_PDI_UE_IP_ADDR;
-	update->pdi.ue_addr = pdr->pdi.ue_ip_address;
-
-	if (!ISSET_BIT (pdr->pdi.grp.fields, PDI_SDF_FILTER) &&
-	    !ISSET_BIT (pdr->pdi.grp.fields, PDI_APPLICATION_ID))
-	  {
-	    /* neither SDF, nor Application Id, generate a wildcard
-	       ACL to make ACL scanning simpler */
-	    update->pdi.fields |= F_PDI_SDF_FILTER;
-	    vec_reset_length (update->pdi.acl);
-	    vec_add1 (update->pdi.acl, wildcard_acl);
-	  }
       }
 
     if (ISSET_BIT (pdr->pdi.grp.fields, PDI_SDF_FILTER))
@@ -1337,10 +1362,13 @@ handle_update_pdr (upf_session_t * sx, pfcp_update_pdr_t * update_pdr,
 
     updated_pdr->pdr_id = update->id;
     updated_pdr->f_teid = update->pdi.teid;
+    updated_pdr->ue_ip_address = update->pdi.ue_addr;
+    SET_BIT (grp->fields, SESSION_MODIFICATION_RESPONSE_CREATED_PDR);
 
     // UPDATE_PDR_ACTIVATE_PREDEFINED_RULES
   }
 
+  created_pdr_vec = &created_vec;
   if (r != 0)
     {
       response->cause = PFCP_CAUSE_RULE_CREATION_MODIFICATION_FAILURE;
@@ -1352,11 +1380,32 @@ handle_update_pdr (upf_session_t * sx, pfcp_update_pdr_t * update_pdr,
   return r;
 }
 
-static void
-release_teid(pfcp_remove_pdr_t *pdr)
+static int
+release_teid(upf_session_t *sx, u32 pdr_id)
 {
-  //TODO: release teid allocated. Check choose_id first, release if choose_id unset
-  return;
+  struct rules *rules = pfcp_get_rules(sx, PFCP_PENDING);
+  upf_pdr_t r = { .id = pdr_id };
+  upf_pdr_t *p;
+  u32 teid;
+  u8 choose_id;
+  upf_main_t *gtm = &upf_main;
+
+  if (pfcp_make_pending_pdr(sx) != 0)
+    return -1;
+
+  if (!(p = vec_bsearch(&r, rules->pdr, pfcp_pdr_id_compare)))
+    return -1;
+
+  teid = p->pdi.teid.teid;
+  choose_id = p->pdi.teid.choose_id;
+
+  if (choose_id && teid_lookup_by_choose_id(sx, choose_id))
+     return -1;
+
+  if (teid_add_del (gtm, teid, 0))
+    upf_debug("Unable to release TEI=%d\n", teid);
+
+  return 0;
 }
 
 static int
@@ -1377,7 +1426,8 @@ handle_remove_pdr (upf_session_t * sx, pfcp_remove_pdr_t * remove_pdr,
 
   vec_foreach (pdr, remove_pdr)
   {
-    release_teid(pdr);
+    if (release_teid(sx, pdr->pdr_id) != 0)
+      upf_debug("Can't release TEID for PDR_ID=%d\n", pdr->pdr_id);
     if ((r = pfcp_delete_pdr (sx, pdr->pdr_id)) != 0)
       {
 	upf_debug ("Failed to remove PDR %d\n", pdr->pdr_id);
@@ -2624,7 +2674,7 @@ handle_session_establishment_request (pfcp_msg_t * req,
       pending->inactivity_timer.handle = ~0;
     }
 
-  if ((r = handle_create_pdr (sess, msg->create_pdr, &resp.grp, resp.created_pdr,
+  if ((r = handle_create_pdr (sess, msg->create_pdr, &resp.grp, &resp.created_pdr,
 			      SESSION_ESTABLISHMENT_RESPONSE_FAILED_RULE_ID,
 			      &resp.failed_rule_id)) != 0)
     goto out_send_resp;
@@ -2733,12 +2783,12 @@ handle_session_modification_request (pfcp_msg_t * req,
 	  pending->inactivity_timer.handle = ~0;
 	}
 
-      if ((r = handle_create_pdr (sess, msg->create_pdr, &resp.grp, resp.created_pdr,
+      if ((r = handle_create_pdr (sess, msg->create_pdr, &resp.grp, &resp.created_pdr,
 				  SESSION_MODIFICATION_RESPONSE_FAILED_RULE_ID,
 				  &resp.failed_rule_id)) != 0)
 	goto out_send_resp;
 
-      if ((r = handle_update_pdr (sess, msg->update_pdr, &resp.grp, resp.created_pdr,
+      if ((r = handle_update_pdr (sess, msg->update_pdr, &resp.grp, &resp.created_pdr,
 				  SESSION_MODIFICATION_RESPONSE_FAILED_RULE_ID,
 				  &resp.failed_rule_id)) != 0)
 	goto out_send_resp;

@@ -864,6 +864,8 @@ encode_f_teid (void *p, u8 ** vec)
   pfcp_f_teid_t *v = p;
 
   put_u8 (*vec, v->flags);
+
+  if (!(v->flags & F_TEID_CH))
   put_u32 (*vec, v->teid);
   if (v->flags & F_TEID_V4)
     put_ip4 (*vec, v->ip4);

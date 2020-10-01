@@ -1112,6 +1112,61 @@ class TestPGWIPv6(IPv6Mixin, TestPGWBase, framework.VppTestCase):
     def ue_ip(self):
         return self.UE_IP
 
+
+class TestPGWFTUPIP4(IPv4Mixin, TestPGWBase, framework.VppTestCase):
+    """IPv4 PGW Test"""
+    UE_IP = "198.20.0.2"
+
+    @property
+    def ue_ip(self):
+        return self.UE_IP
+
+    def forward_pdr(self):
+        return IE_CreatePDR(IE_list=[
+            IE_FAR_Id(id=1),
+            self.ie_outer_header_removal(),
+            IE_PDI(IE_list=[
+                IE_NetworkInstance(instance="epc"),
+                IE_SDF_Filter(
+                    FD=1,
+                    flow_description="permit out ip from " +
+                    "any to assigned"),
+                IE_SourceInterface(interface="Access"),
+                self.ie_ue_ip_address(),
+                self.ie_fteid_ch(),
+            ]),
+            IE_PDR_Id(id=1),
+            IE_Precedence(precedence=200),
+            IE_URR_Id(id=1),
+        ])
+
+class TestPGWFTUPIP6(IPv6Mixin, TestPGWBase, framework.VppTestCase):
+    """IPv6 PGW Test"""
+    UE_IP = "2001:db8:13::2"
+
+    @property
+    def ue_ip(self):
+        return self.UE_IP
+
+    def forward_pdr(self):
+        return IE_CreatePDR(IE_list=[
+            IE_FAR_Id(id=1),
+            self.ie_outer_header_removal(),
+            IE_PDI(IE_list=[
+                IE_NetworkInstance(instance="epc"),
+                IE_SDF_Filter(
+                    FD=1,
+                    flow_description="permit out ip from " +
+                    "any to assigned"),
+                IE_SourceInterface(interface="Access"),
+                self.ie_ue_ip_address(),
+                self.ie_fteid_ch(),
+            ]),
+            IE_PDR_Id(id=1),
+            IE_Precedence(precedence=200),
+            IE_URR_Id(id=1),
+        ])
+
 # TODO: send session report response
 # TODO: check for heartbeat requests from UPF
 # TODO: check redirects (perhaps IPv4 type redirect) -- currently broken
