@@ -45,6 +45,9 @@ int pfcp_sort_##t##s(struct rules *rules);				\
 int pfcp_delete_##t(upf_session_t *sx, u32 t##_id);			\
 int pfcp_##t##_id_compare(const void *p1, const void *p2);		\
 
+#define PFCP_SPEC_15 (1 << 15)
+#define PFCP_SPEC_16 (1 << 16)
+
 /* *INDENT-OFF* */
 pfcp_rule_vector_fns (pdr)
 pfcp_rule_vector_fns (far)

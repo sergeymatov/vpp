@@ -794,57 +794,50 @@ decode_f_teid (u8 * data, u16 length, void *p)
 {
   pfcp_f_teid_t *v = p;
 
-//  if (length < 5)
-//   return PFCP_CAUSE_INVALID_LENGTH;
+  if (length < 1)
+   return PFCP_CAUSE_INVALID_LENGTH;
 
   v->flags = get_u8 (data) & 0x0f;
+
   if (!(v->flags & F_TEID_CH))
-  {
-    v->teid = get_u32 (data);
-    length -= 5;
-  }
-
-  if (v->flags & F_TEID_CH)
-    {
-      if (v->flags & (F_TEID_V4 | F_TEID_V6))
-	{
-	  pfcp_debug ("PFCP: F-TEID with invalid flags (CH and v4/v6): %02x.",
-		      v->flags);
-	  return -1;
-	}
-    }
-  else
-    {
-      if (v->flags & F_TEID_CHID)
-	{
-	  pfcp_debug
-	    ("PFCP: F-TEID with invalid flags (CHID without CH): %02x.",
-	     v->flags);
-	  return -1;
-	}
-      if (!(v->flags & (F_TEID_V4 | F_TEID_V6)))
-	{
-	  pfcp_debug ("PFCP: F-TEID without v4/v6 address: %02x.", v->flags);
-	  return -1;
-	}
-    }
-
-  if (v->flags & F_TEID_V4)
     {
       if (length < 4)
-	return PFCP_CAUSE_INVALID_LENGTH;
-
-      get_ip4 (v->ip4, data);
+        return PFCP_CAUSE_INVALID_LENGTH;
+      v->teid = get_u32 (data);
       length -= 4;
-    }
 
-  if (v->flags & F_TEID_V6)
-    {
-      if (length < 16)
-	return PFCP_CAUSE_INVALID_LENGTH;
+      if (v->flags & F_TEID_CHID)
+        {
+          pfcp_debug
+            ("PFCP: F-TEID with invalid flags (CHID without CH): %02x.",
+             v->flags);
+          return -1;
+        }
 
-      get_ip6 (v->ip6, data);
-      length -= 16;
+      if (!(v->flags & (F_TEID_V4 | F_TEID_V6)))
+        {
+          pfcp_debug ("PFCP: F-TEID without v4/v6 address: %02x.", v->flags);
+          return -1;
+        }
+
+        if (v->flags & F_TEID_V4)
+          {
+            if (length < 4)
+              return PFCP_CAUSE_INVALID_LENGTH;
+
+            get_ip4 (v->ip4, data);
+            length -= 4;
+          }
+
+        if (v->flags & F_TEID_V6)
+          {
+            if (length < 16)
+              return PFCP_CAUSE_INVALID_LENGTH;
+
+            get_ip6 (v->ip6, data);
+            length -= 16;
+          }
+
     }
 
   if (v->flags & F_TEID_CHID)
@@ -865,7 +858,6 @@ encode_f_teid (void *p, u8 ** vec)
 
   put_u8 (*vec, v->flags);
 
-  if (!(v->flags & F_TEID_CH))
   put_u32 (*vec, v->teid);
   if (v->flags & F_TEID_V4)
     put_ip4 (*vec, v->ip4);

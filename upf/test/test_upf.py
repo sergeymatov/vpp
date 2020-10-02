@@ -142,7 +142,7 @@ class IPv4Mixin(object):
         return IE_FTEID(V4=1, TEID=self.UNODE_TEID, ipv4=self.if_grx.local_ip4)
 
     def ie_fteid_ch(self):
-        return IE_FTEID(CH=1, CHID=1, choose_id=200)
+        return IE_FTEID(CH=1, CHID=1, choose_id=200, V4=1)
 
     def ie_ue_ip_address(self, SD=0):
         return IE_UE_IP_Address(ipv4=self.ue_ip, V4=1, SD=SD)
@@ -231,6 +231,7 @@ class IPv6Mixin(object):
             "upf nwi name cp vrf 0",
             "upf nwi name epc vrf 100",
             "upf nwi name sgi vrf 200",
+            "upf specification release 16",
             "upf pfcp endpoint ip %s vrf 0" % cls.if_cp.local_ip6,
             "ip route add ::/0 table 200 via %s %s" %
             (cls.if_sgi.remote_ip6, cls.if_sgi.name),
@@ -270,7 +271,7 @@ class IPv6Mixin(object):
         return IE_FTEID(V6=1, TEID=self.UNODE_TEID, ipv6=self.if_grx.local_ip6)
 
     def ie_fteid_ch(self):
-        return IE_FTEID(CH=1, CHID=1, choose_id=200)
+        return IE_FTEID(CH=1, CHID=1, choose_id=200, V6=1)
 
     def ie_ue_ip_address(self, SD=0):
         return IE_UE_IP_Address(ipv6=self.ue_ip, V6=1, SD=SD)

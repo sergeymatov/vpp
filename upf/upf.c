@@ -357,15 +357,9 @@ upf_init (vlib_main_t * vm)
   upf_fib_source = fib_source_allocate ("upf-tdf-route",
 					FIB_SOURCE_PRIORITY_HI,
 					FIB_SOURCE_BH_SIMPLE);
-  sm->upf_ftup = true;
-  time_t t;
-  srand((unsigned) time(&t));
+  sm->pfcp_spec_version = 15;
 
-  f64 base = vlib_time_now (sm->vlib_main);
-  sm->rand_base = (u32) (base * rand());
-
-  sm->teid_table = hash_create ( /* initial length */ 32, sizeof (u32));
-  
+  sm->rand_base = random_default_seed ();
 
   error = flowtable_init (vm);
   if (error)

@@ -539,7 +539,8 @@ pfcp_create_session (upf_node_assoc_t * assoc,
   hash_set (gtm->session_by_id, cp_seid, sx - gtm->sessions);
 
   /*Init TEID by choose_id hash lookup table */
-  sx->teid_by_choose_id_table = hash_create(/*Initial length */ 32, sizeof (u32));
+  //sx->teid_by_choose_id_table = hash_create(/*Initial length */ 32, sizeof (u32));
+  sx->teid_by_choose_id_table = sparse_vec_new (/*elt bytes*/sizeof(u32), /*bits in index*/ 8);
 
   vlib_worker_thread_barrier_release (vm);
 
@@ -1045,8 +1046,6 @@ pfcp_free_session (upf_session_t * sx)
   for (size_t i = 0; i < ARRAY_LEN (sx->rules); i++)
     pfcp_free_rules (sx, i);
 
-
-  hash_free(sx->teid_by_choose_id_table);
   clib_spinlock_free (&sx->lock);
   pool_put (gtm->sessions, sx);
 
@@ -1584,11 +1583,10 @@ build_pfcp_rules (upf_session_t * sx)
   {
     upf_pdr_t *pdr = vec_elt_at_index (pending->pdr, idx);
     u32 sw_if_index = ~0;
-    upf_nwi_t *nwi = NULL;
 
     if (pdr->pdi.nwi_index != ~0)
       {
-	nwi = pool_elt_at_index (gtm->nwis, pdr->pdi.nwi_index);
+	upf_nwi_t *nwi = pool_elt_at_index (gtm->nwis, pdr->pdi.nwi_index);
 	sw_if_index = nwi->sw_if_index;
       }
 

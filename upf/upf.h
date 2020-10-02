@@ -25,6 +25,7 @@
 #include <vppinfra/hash.h>
 #include <vppinfra/bihash_8_8.h>
 #include <vppinfra/bihash_24_8.h>
+#include <vppinfra/sparse_vec.h>
 
 #include <vnet/vnet.h>
 #include <vnet/ip/ip.h>
@@ -775,9 +776,6 @@ typedef struct
   upf_upip_res_t *upip_res;
   mhash_t upip_res_index;
 
-  /* teid availability table */
-  u32 *teid_table;
-
   /* vector of encap tunnel instances */
   upf_session_t *sessions;
 
@@ -830,7 +828,7 @@ typedef struct
   upf_adf_app_t *upf_apps;
 
   //TODO: Change to UPF flags?
-  bool upf_ftup;
+  u32 pfcp_spec_version;
   u32 rand_base;
   u32 choosed_teid[UPF_CHOOSEID_MAX];
 } upf_main_t;
