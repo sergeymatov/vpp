@@ -1102,10 +1102,6 @@ handle_create_pdr (upf_session_t * sx, pfcp_create_pdr_t * create_pdr,
 	}
       }
 
-    //memcpy(&created_pdr->pdr_id, &create->id, sizeof(created_pdr->pdr_id));
-    //memcpy(&created_pdr->f_teid, &create->pdi.teid, sizeof(created_pdr->f_teid));
-    //memcpy(&created_pdr->ue_ip_address, &create->pdi.ue_addr, sizeof(created_pdr->ue_ip_address));
-
     // CREATE_PDR_ACTIVATE_PREDEFINED_RULES
   }
 
